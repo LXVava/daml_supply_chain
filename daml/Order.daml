@@ -1,0 +1,28 @@
+daml 1.2
+module Order where
+
+import Item
+
+template Order
+  with
+    buyer : Party
+    supplier : Party
+    sku : Text
+    qty : Int
+  where
+    signatory buyer
+
+    controller supplier can
+      Order_Accept : ItemCid
+        with
+          orderItemCid : ItemCid
+        do
+          baseItem <- fetch orderItemCid
+          (fulfilledItem, inventory) <- exercise orderItemCid Item_Split with splitAmount = qty
+          fulfilledItemTransferCid <- exercise fulfilledItem Item_Ship with
+            newOwner = buyer
+          transferredFulfilledItemCid <- exercise fulfilledItemTransferCid ItemShip_Accept
+          return transferredFulfilledItemCid
+
+      Order_Reject : ()
+        do return ()

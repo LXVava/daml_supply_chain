@@ -1,0 +1,97 @@
+daml 1.2
+module RawItem where
+
+import Item
+
+type RawItemCid = ContractId RawItem
+
+template RawItem
+  with
+    supplier : Party
+    owner : Party
+    sku : Text
+    qty : Int
+    observers : [Party]
+  where
+    ensure qty > 0
+
+    signatory supplier, owner
+
+    observer observers
+
+    controller owner can
+
+      -- Split the IOU by dividing the amount.
+      RawItem_Split : (RawItemCid, RawItemCid)
+         with
+          splitAmount: Int
+        do
+          let restAmount = qty - splitAmount
+          splitCid <- create this with qty = splitAmount
+          restCid <- create this with qty = restAmount
+          return (splitCid, restCid)
+
+      Item_Mfg : ItemCid
+        do
+          let newQty = qty / 5
+          create Item with
+            supplier = supplier
+            owner = owner
+            sku = sku
+            qty =  newQty
+            observers = observers
+
+      -- Merge two IOUs by aggregating their amounts.
+      RawItem_Merge : RawItemCid
+        with
+          otherCid: RawItemCid
+        do
+          otherRawItem <- fetch otherCid
+          -- Check the two IOU's are compatible
+          assert (
+            sku == otherRawItem.sku &&
+            owner == otherRawItem.owner &&
+            supplier == otherRawItem.supplier
+            )
+          -- Retire the old Item
+          archive otherCid
+          -- Return the merged Item
+          cid <- create this with qty = qty + otherRawItem.qty
+          return cid
+
+      RawItem_Ship : ContractId RawItemShip
+        with
+          newOwner : Party
+        do create RawItemShip with item = this; newOwner
+
+      RawItem_AddObserver : RawItemCid
+        with
+          newObserver : Party
+        do create this with observers = newObserver :: observers
+
+      RawItem_RemoveObserver : RawItemCid
+        with
+          oldObserver : Party
+        do create this with observers = filter (/= oldObserver) observers
+
+template RawItemShip
+  with
+    item : RawItem
+    newOwner : Party
+  where
+    signatory item.supplier, item.owner
+
+    controller item.owner can
+      RawItemShip_Cancel : RawItemCid
+        do create item
+
+    controller newOwner can
+      RawItemShip_Reject : RawItemCid
+        do create item
+
+      RawItemShip_Accept : RawItemCid
+        do
+          create item with
+            owner = newOwner
+            supplier = newOwner
+            observers = []

@@ -1,0 +1,62 @@
+-- Copyright (c) 2019 The DAML Authors. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+daml 1.2
+module Main where
+
+import RawItem
+import Order
+import RawOrder
+
+setup = scenario do
+  store <- getParty "Retailer"
+  dist <- getParty "Distributor"
+  mfg <- getParty "Manufacturer"
+  rawPrd <- getParty "RawProductProducer"
+
+  rawProductCid <- submit rawPrd do
+    create RawItem with
+      supplier = rawPrd
+      owner = rawPrd
+      sku = "abc123"
+      qty = 100
+      observers = []
+
+  shippedRawCid <- submit rawPrd do
+    exercise rawProductCid RawItem_Ship with newOwner = rawPrd
+     
+  acceptedRawCid <- submit rawPrd do
+    exercise shippedRawCid RawItemShip_Accept 
+  
+  mfgComponentCid <- submit mfg do
+    create RawOrder with
+      buyer = mfg
+      supplier = rawPrd
+      sku = "abc123"
+      qty = 50
+  
+  shippedRawCid <- submit rawPrd do 
+    exercise mfgComponentCid RawOrder_Accept with orderItemCid = acceptedRawCid
+
+  mfgItemCid <- submit mfg do
+    exercise shippedRawCid Item_Mfg
+
+  distCid <- submit dist do
+    create Order with
+      buyer = dist
+      supplier = mfg
+      sku = "abc123"
+      qty = 5
+  
+  retailerCid <- submit mfg do 
+    exercise distCid Order_Accept with orderItemCid = mfgItemCid
+
+  retailCid <- submit store do
+    create Order with
+      buyer = store
+      supplier = dist
+      sku = "abc123"
+      qty = 1
+
+  submit dist do
+    exercise retailCid Order_Accept with  orderItemCid = retailerCid
