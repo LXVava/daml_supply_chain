@@ -1,62 +1,154 @@
--- Copyright (c) 2019 The DAML Authors. All rights reserved.
--- SPDX-License-Identifier: Apache-2.0
-
 daml 1.2
 module Main where
 
-import RawItem
+import SCTypes
+import RMInventory
+import CMInventory
+import ASMInventory
+import WHSInventory
 import Order
-import RawOrder
+
 
 setup = scenario do
   store <- getParty "Retailer"
-  dist <- getParty "Distributor"
-  mfg <- getParty "Manufacturer"
-  rawPrd <- getParty "RawProductProducer"
+  dist <- getParty "Warehouse"
+  assmbly <- getParty "Assembler"
+  cmMfg <- getParty "Manufacturer"
+  rmPrd <- getParty "RawMaterialProducer"
 
-  rawProductCid <- submit rawPrd do
-    create RawItem with
-      supplier = rawPrd
-      owner = rawPrd
+  rawMaterialsInventory <- submit rmPrd do
+    create RawMaterial with
+      supplier = rmPrd
+      owner = rmPrd
       sku = "abc123"
       qty = 100
       observers = []
 
-  shippedRawCid <- submit rawPrd do
-    exercise rawProductCid RawItem_Ship with newOwner = rawPrd
-     
-  acceptedRawCid <- submit rawPrd do
-    exercise shippedRawCid RawItemShip_Accept 
-  
-  mfgComponentCid <- submit mfg do
-    create RawOrder with
-      buyer = mfg
-      supplier = rawPrd
+  componentInventory <- submit cmMfg do
+    create Component with
+      supplier = cmMfg
+      owner = cmMfg
+      sku = ""
+      qty = 0
+      observers = []
+
+  assemblyInventory <- submit assmbly do
+    create Assembly with
+      supplier = assmbly
+      owner = assmbly
+      sku = ""
+      qty = 0
+      observers = []
+
+  warehouseInventory <- submit dist do
+    create Warehouse with
+      supplier = dist
+      owner = dist
+      sku = ""
+      qty = 0
+      observers = []
+
+  rawMaterialsOrder <- submit cmMfg do
+    create Order with
+      buyer = cmMfg
+      oSupplier = cmMfg
       sku = "abc123"
       qty = 50
-  
-  shippedRawCid <- submit rawPrd do 
-    exercise mfgComponentCid RawOrder_Accept with orderItemCid = acceptedRawCid
+      status = "Open"
+      assetType = RwMtrl
+      observers = [rmPrd]
 
-  mfgItemCid <- submit mfg do
-    exercise shippedRawCid Item_Mfg
+  acceptedRawMaterialsOrder <- submit rmPrd do
+    exercise rawMaterialsOrder OrderAccept with 
+      party = rmPrd
 
-  distCid <- submit dist do
+  inv <- submit rmPrd do
+    exercise rawMaterialsInventory RMfill with 
+      oid = acceptedRawMaterialsOrder
+
+  let rawMaterialsInventory = inv._1
+  let rawMaterialsOrder = inv._2
+
+  mfg <- submit cmMfg do
+    exercise componentInventory CMMfg with
+      rwInvId = rawMaterialsOrder
+
+  let cmInv = mfg._1
+  let cmRMInv = mfg._2
+
+  assemblyComponenetOrder <- submit assmbly do
     create Order with
-      buyer = dist
-      supplier = mfg
+      buyer = assmbly
+      oSupplier = assmbly
       sku = "abc123"
       qty = 5
-  
-  retailerCid <- submit mfg do 
-    exercise distCid Order_Accept with orderItemCid = mfgItemCid
+      status = "Open"
+      assetType = Cmpnnt
+      observers = [cmMfg]
 
-  retailCid <- submit store do
+  acceptedAssemblyOrder <- submit cmMfg do
+    exercise assemblyComponenetOrder OrderAccept with 
+      party = cmMfg
+
+  asInventory <- submit cmMfg do
+    exercise cmInv CMfill with 
+      oid = acceptedAssemblyOrder
+
+  let componentsInventory = asInventory._1
+  let componentsOrder = asInventory._2
+
+  asmblInventory <- submit assmbly do
+    exercise assemblyInventory ASAssemble with
+      cmpnntId = componentsOrder
+
+  let asInv = asmblInventory._1
+  let asCmpnntInv = asmblInventory._2
+
+  whseOrder <- submit dist do
+    create Order with
+      buyer = dist
+      oSupplier = dist
+      sku = "abc123"
+      qty = 2
+      status = "Open"
+      assetType = Assmbld
+      observers = [assmbly]
+
+  acceptedWhseOrder <- submit assmbly do
+    exercise whseOrder OrderAccept with 
+      party = assmbly
+
+  wsInventory <- submit assmbly do
+    exercise asInv ASMfill with 
+      oid = acceptedWhseOrder
+
+  let whseInv = wsInventory._1
+  let whseOrder = wsInventory._2
+
+  whse <- submit dist do
+    exercise warehouseInventory WHSStore with
+      assmblyId = whseOrder
+
+  let whsInv = whse._1
+  let whseAssmblyInv = whse._2
+
+  storeOrder <- submit store do
     create Order with
       buyer = store
-      supplier = dist
+      oSupplier = store
       sku = "abc123"
       qty = 1
+      status = "Open"
+      assetType = Wrhsd
+      observers = [dist]
+
+  acceptedStoreOrder <- submit dist do
+    exercise storeOrder OrderAccept with 
+      party = dist
 
   submit dist do
-    exercise retailCid Order_Accept with  orderItemCid = retailerCid
+    exercise whsInv WHSfill with 
+      oid = acceptedStoreOrder
+
+  
+

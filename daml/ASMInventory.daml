@@ -1,0 +1,112 @@
+daml 1.2
+module ASMInventory where
+
+import SCTypes
+import Order
+
+import CMInventory
+
+type AssemblyCid = ContractId Assembly
+
+template Assembly
+  with
+    supplier : Party
+    owner : Party
+    sku : Text
+    qty : Int
+    observers : [Party]
+  where
+    ensure qty >= 0
+
+    signatory supplier
+
+    observer observers
+
+
+    controller owner can
+
+        ASMQty : AssemblyCid
+            with
+                nQty : Int
+            do
+                create this with
+                    qty = nQty
+
+        ASAssemble : (AssemblyCid, ComponentCid)
+            with
+                cmpnntId : ComponentCid
+            do
+                component <- fetch cmpnntId
+                let asmAmount = component.qty / 2
+                let remainAmount = component.qty % 2
+                nCmpntInv <- exercise cmpnntId CMQty with
+                    nQty = remainAmount
+                asmInv <- create this with 
+                    qty = asmAmount
+                return (asmInv, nCmpntInv)
+
+
+        -- Split the Inventory by dividing the amount.
+        ASMSplit : (AssemblyCid, AssemblyCid)
+            with
+                splitAmount: Int
+            do
+                let restAmount = qty - splitAmount
+                splitCid <- create this with qty = splitAmount
+                restCid <- create this with qty = restAmount
+                return (splitCid, restCid)
+
+        -- Merge two Inventories by aggregating their amounts.
+        ASMMerge : AssemblyCid
+            with
+                otherCid: AssemblyCid
+            do
+                otherAssembly <- fetch otherCid
+                -- Check the two Inventories are compatible
+                assert (
+                    sku == otherAssembly.sku &&
+                    owner == otherAssembly.owner &&
+                    supplier == otherAssembly.supplier
+                    )
+                -- Retire the old Item
+                archive otherCid
+                -- Return the merged Item
+                create this with qty = qty + otherAssembly.qty
+               
+
+        ASMAddObserver : AssemblyCid
+            with
+                newObserver : Party
+            do 
+                create this with 
+                    observers = newObserver :: observers
+
+        ASMRemoveObserver : AssemblyCid
+            with
+                oldObserver : Party
+            do 
+                create this with 
+                    observers = filter (/= oldObserver) observers
+
+        ASMfill : (AssemblyCid, AssemblyCid)
+            with
+                oid : OrderCid
+            do  
+                order <- fetch oid
+                assert (
+                    order.assetType == Assmbld &&
+                    order.qty <= qty
+                    )
+
+                let fAmount = order.qty
+               
+                exercise oid OrderFill with 
+                    fillQuantity = fAmount
+                    fillAssetType = Assmbld                
+
+                inv <- create this with qty = qty - fAmount
+                fill <- create this with 
+                    qty = fAmount
+                    owner = order.buyer
+                return (inv, fill)
+            

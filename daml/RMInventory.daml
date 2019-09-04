@@ -1,0 +1,95 @@
+daml 1.2
+module RMInventory where
+
+import SCTypes
+import Order
+
+type RawMaterialCid = ContractId RawMaterial
+template RawMaterial
+  with
+    supplier : Party
+    owner : Party
+    sku : Text
+    qty : Int
+    observers : [Party]
+  where
+    ensure qty > 0
+
+    signatory supplier
+
+    observer observers
+
+
+    controller owner can
+
+        RMQty : RawMaterialCid
+            with
+                nQty : Int
+            do
+                create this with
+                    qty = nQty
+
+        RMfill : (RawMaterialCid, RawMaterialCid)
+            with
+                oid : OrderCid
+            do 
+                order <- fetch oid
+
+                let fAmount = order.qty
+                assert (
+                    order.assetType == RwMtrl &&
+                    fAmount <= qty
+                    )
+                
+                exercise oid OrderFill with 
+                    fillQuantity = fAmount
+                    fillAssetType = RwMtrl                
+
+                inv <- create this with qty = qty - fAmount
+                fill <- create this with 
+                    qty = fAmount
+                    owner = order.buyer
+                return (inv, fill)
+
+        -- Split the Inventory by dividing the amount.
+        RMSplit : (RawMaterialCid, RawMaterialCid)
+            with
+                splitAmount: Int
+            do
+                let restAmount = qty - splitAmount
+                splitCid <- create this with qty = splitAmount
+                restCid <- create this with qty = restAmount
+                return (splitCid, restCid)
+
+        -- Merge two Inventories by aggregating their amounts.
+        RMMerge : RawMaterialCid
+            with
+                otherCid: RawMaterialCid
+            do
+                otherRawMaterial <- fetch otherCid
+                -- Check the two Inventories are compatible
+                assert (
+                    sku == otherRawMaterial.sku &&
+                    owner == otherRawMaterial.owner &&
+                    supplier == otherRawMaterial.supplier
+                    )
+                -- Retire the old Item
+                archive otherCid
+                -- Return the merged Item
+                create this with qty = qty + otherRawMaterial.qty
+               
+
+        RMAddObserver : RawMaterialCid
+            with
+                newObserver : Party
+            do 
+                create this with 
+                    observers = newObserver :: observers
+
+        RMRemoveObserver : RawMaterialCid
+            with
+                oldObserver : Party
+            do 
+                create this with 
+                    observers = filter (/= oldObserver) observers
+

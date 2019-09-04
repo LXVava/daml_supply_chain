@@ -1,28 +1,56 @@
 daml 1.2
 module Order where
 
-import Item
+import SCTypes
+
+type OrderCid = ContractId Order
 
 template Order
   with
     buyer : Party
-    supplier : Party
+    oSupplier : Party
     sku : Text
     qty : Int
+    status : Text
+    assetType : AssetType
+    observers : [Party] 
   where
     signatory buyer
 
-    controller supplier can
-      Order_Accept : ItemCid
-        with
-          orderItemCid : ItemCid
-        do
-          baseItem <- fetch orderItemCid
-          (fulfilledItem, inventory) <- exercise orderItemCid Item_Split with splitAmount = qty
-          fulfilledItemTransferCid <- exercise fulfilledItem Item_Ship with
-            newOwner = buyer
-          transferredFulfilledItemCid <- exercise fulfilledItemTransferCid ItemShip_Accept
-          return transferredFulfilledItemCid
+    controller observers can
 
-      Order_Reject : ()
-        do return ()
+        OrderAccept : OrderCid
+            with
+                party : Party
+            do create this with 
+                status = "Accept"
+                oSupplier = party
+                observers = []
+
+    controller buyer can 
+
+        OrderCancel :  OrderCid
+            do create this with
+                status = "Cancelled"
+
+    controller oSupplier can
+
+        OrderFill : OrderCid
+            with
+                fillQuantity : Int
+                fillAssetType : AssetType
+            do
+                assert (
+                    fillQuantity == qty &&
+                    fillAssetType == assetType
+                    )
+                oid <- create this with 
+                    status = "Filled"
+                archive oid
+                return oid
+       
+
+        OrderReject : OrderCid
+            do 
+            create this with 
+                status = "Rejected"
