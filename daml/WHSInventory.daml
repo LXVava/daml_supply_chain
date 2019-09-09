@@ -7,18 +7,19 @@ import Order
 import ASMInventory
 
 type WarehouseCid = ContractId Warehouse
-
 template Warehouse
+
   with
     supplier : Party
     owner : Party
     sku : Text
     qty : Int
     observers : [Party]
+
   where
     ensure qty >= 0
 
-    signatory supplier
+    signatory owner
 
     observer observers
 
@@ -30,58 +31,20 @@ template Warehouse
                 assmblyId : AssemblyCid
             do
                 assembly <- fetch assmblyId
+                archive assmblyId
                 asmInv <- create this with 
                     qty = assembly.qty + qty
-                nAssmblyInv <- exercise assmblyId ASMQty with
-                    nQty = 0
+
+                nAssmblyInv <- create assembly with
+                    qty = 0
+
+                archive nAssmblyInv
+
                 return (asmInv, nAssmblyInv)
-
-
-        -- Split the Inventory by dividing the amount.
-        WHSSplit : (WarehouseCid, WarehouseCid)
-            with
-                splitAmount: Int
-            do
-                let restAmount = qty - splitAmount
-                splitCid <- create this with qty = splitAmount
-                restCid <- create this with qty = restAmount
-                return (splitCid, restCid)
-
-        -- Merge two Inventories by aggregating their amounts.
-        WHSMerge : WarehouseCid
-            with
-                otherCid: WarehouseCid
-            do
-                otherWarehouse <- fetch otherCid
-                -- Check the two Inventories are compatible
-                assert (
-                    sku == otherWarehouse.sku &&
-                    owner == otherWarehouse.owner &&
-                    supplier == otherWarehouse.supplier
-                    )
-                -- Retire the old Item
-                archive otherCid
-                -- Return the merged Item
-                create this with qty = qty + otherWarehouse.qty
-               
-
-        WHSAddObserver : WarehouseCid
-            with
-                newObserver : Party
-            do 
-                create this with 
-                    observers = newObserver :: observers
-
-        WHSRemoveObserver : WarehouseCid
-            with
-                oldObserver : Party
-            do 
-                create this with 
-                    observers = filter (/= oldObserver) observers
 
         WHSfill : (WarehouseCid, WarehouseCid)
             with
-                oid : OrderCid
+                oid : AcceptedOrderCid
             do  
                 order <- fetch oid
                 assert (
@@ -91,13 +54,46 @@ template Warehouse
 
                 let fAmount = order.qty
                
-                exercise oid OrderFill with 
+                exercise oid Fill with 
                     fillQuantity = fAmount
-                    fillAssetType = Wrhsd                
+                    fillAssetType = Wrhsd
+                    fillSku = sku               
 
-                inv <- create this with qty = qty - fAmount
+                inv <- create this with 
+                    qty = qty - fAmount
+
                 fill <- create this with 
                     qty = fAmount
-                    owner = order.buyer
                 return (inv, fill)
-            
+
+        WHSTransfer : WarehouseTransferId
+            with
+                newOwner : Party
+            do create WarehouseTransfer with
+                whse = this; newOwner
+
+
+type WarehouseTransferId = ContractId WarehouseTransfer
+template WarehouseTransfer
+
+    with 
+        whse : Warehouse
+        newOwner: Party
+        
+    where
+        signatory whse.supplier, whse.owner
+
+        controller whse.owner can
+            WHSCancel : WarehouseCid
+                do create whse
+
+        controller newOwner can
+            WHSReject : WarehouseCid
+                do create whse
+
+            WHSAccept : WarehouseCid
+                do
+                newwhse <- create whse with
+                    owner = newOwner
+                    observers = []
+                return newwhse

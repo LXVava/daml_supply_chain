@@ -7,7 +7,6 @@ import Order
 import RMInventory
 
 type ComponentCid = ContractId Component
-
 template Component
   with
     supplier : Party
@@ -18,64 +17,32 @@ template Component
   where
     ensure qty >= 0
 
-    signatory supplier
+    signatory owner
 
     observer observers
 
-
     controller owner can
-        CMQty : ComponentCid
+
+        CMMfg : (ComponentCid, RawMaterialCid)
             with
-                nQty : Int
+                rwInvId : RawMaterialCid
+                materialsUsed : Int
+                componentsManufactured : Int
             do
-                create this with
-                    qty = nQty
+                rawInv <- fetch rwInvId
+                assert (materialsUsed <= rawInv.qty)
+                archive rwInvId                
+                
+                nRawInv <- create rawInv with                    
+                    qty = rawInv.qty - materialsUsed
 
-        -- Split the Inventory by dividing the amount.
-        CMSplit : (ComponentCid, ComponentCid)
-            with
-                splitAmount: Int
-            do
-                let restAmount = qty - splitAmount
-                splitCid <- create this with qty = splitAmount
-                restCid <- create this with qty = restAmount
-                return (splitCid, restCid)
-
-        -- Merge two Inventories by aggregating their amounts.
-        CMMerge : ComponentCid
-            with
-                otherCid: ComponentCid
-            do
-                otherComponent <- fetch otherCid
-                -- Check the two Inventories are compatible
-                assert (
-                    sku == otherComponent.sku &&
-                    owner == otherComponent.owner &&
-                    supplier == otherComponent.supplier
-                    )
-                -- Retire the old Item
-                archive otherCid
-                -- Return the merged Item
-                create this with qty = qty + otherComponent.qty
-               
-
-        CMAddObserver : ComponentCid
-            with
-                newObserver : Party
-            do 
-                create this with 
-                    observers = newObserver :: observers
-
-        CMRemoveObserver : ComponentCid
-            with
-                oldObserver : Party
-            do 
-                create this with 
-                    observers = filter (/= oldObserver) observers
-
+                mfgInv <- create this with 
+                    qty = componentsManufactured
+                return (mfgInv, nRawInv)
+            
         CMfill : (ComponentCid, ComponentCid)
             with
-                oid : OrderCid
+                oid : AcceptedOrderCid
             do  
                 order <- fetch oid
                 let fAmount = order.qty
@@ -84,27 +51,43 @@ template Component
                     fAmount <= qty
                     )
                 
-                exercise oid OrderFill with 
+                exercise oid Fill with 
                     fillQuantity = fAmount
-                    fillAssetType = Cmpnnt                
+                    fillAssetType = Cmpnnt
+                    fillSku = sku               
 
                 inv <- create this with qty = qty - fAmount
                 fill <- create this with 
                     qty = fAmount
-                    owner = order.buyer
                 return (inv, fill)
 
-        
-        CMMfg : (ComponentCid, RawMaterialCid)
+        CMTransfer : ComponentTransferId
             with
-                rwInvId : RawMaterialCid
-            do
-                rawInv <- fetch rwInvId
-                let mfgAmount = rawInv.qty / 3
-                let remainAmount = rawInv.qty % 3
-                nRawInv <- exercise rwInvId RMQty with
-                    nQty = remainAmount
-                mfgInv <- create this with 
-                    qty = mfgAmount
-                return (mfgInv, nRawInv)
-            
+                newOwner : Party
+            do create ComponentTransfer with
+                cmnpt = this; newOwner
+
+
+type ComponentTransferId = ContractId ComponentTransfer
+template ComponentTransfer
+    with 
+        cmnpt : Component
+        newOwner: Party
+        
+    where
+        signatory cmnpt.supplier, cmnpt.owner
+
+        controller cmnpt.owner can
+            CMCancel : ComponentCid
+                do create cmnpt
+
+        controller newOwner can
+            CMReject : ComponentCid
+                do create cmnpt
+
+            CMAccept : ComponentCid
+                do
+                newcmnpt <- create cmnpt with
+                    owner = newOwner
+                    observers = []
+                return newcmnpt

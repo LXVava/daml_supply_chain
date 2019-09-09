@@ -1,13 +1,10 @@
 daml 1.2
 module Main where
 
-import SCTypes
 import RMInventory
 import CMInventory
 import ASMInventory
 import WHSInventory
-import Order
-
 
 setup = scenario do
   store <- getParty "Retailer"
@@ -16,139 +13,36 @@ setup = scenario do
   cmMfg <- getParty "Manufacturer"
   rmPrd <- getParty "RawMaterialProducer"
 
-  rawMaterialsInventory <- submit rmPrd do
+  submit rmPrd do
     create RawMaterial with
       supplier = rmPrd
       owner = rmPrd
-      sku = "abc123"
+      sku = "raw-3465"
       qty = 100
       observers = []
 
-  componentInventory <- submit cmMfg do
+  submit cmMfg do
     create Component with
       supplier = cmMfg
       owner = cmMfg
-      sku = ""
+      sku = "cmpt-2134"
       qty = 0
       observers = []
 
-  assemblyInventory <- submit assmbly do
+  submit assmbly do
     create Assembly with
       supplier = assmbly
       owner = assmbly
-      sku = ""
+      sku = "part-187"
       qty = 0
       observers = []
 
-  warehouseInventory <- submit dist do
+  submit dist do
     create Warehouse with
       supplier = dist
       owner = dist
-      sku = ""
+      sku = "part-187"
       qty = 0
       observers = []
 
-  rawMaterialsOrder <- submit cmMfg do
-    create Order with
-      buyer = cmMfg
-      oSupplier = cmMfg
-      sku = "abc123"
-      qty = 50
-      status = "Open"
-      assetType = RwMtrl
-      observers = [rmPrd]
-
-  acceptedRawMaterialsOrder <- submit rmPrd do
-    exercise rawMaterialsOrder OrderAccept with 
-      party = rmPrd
-
-  inv <- submit rmPrd do
-    exercise rawMaterialsInventory RMfill with 
-      oid = acceptedRawMaterialsOrder
-
-  let rawMaterialsInventory = inv._1
-  let rawMaterialsOrder = inv._2
-
-  mfg <- submit cmMfg do
-    exercise componentInventory CMMfg with
-      rwInvId = rawMaterialsOrder
-
-  let cmInv = mfg._1
-  let cmRMInv = mfg._2
-
-  assemblyComponenetOrder <- submit assmbly do
-    create Order with
-      buyer = assmbly
-      oSupplier = assmbly
-      sku = "abc123"
-      qty = 5
-      status = "Open"
-      assetType = Cmpnnt
-      observers = [cmMfg]
-
-  acceptedAssemblyOrder <- submit cmMfg do
-    exercise assemblyComponenetOrder OrderAccept with 
-      party = cmMfg
-
-  asInventory <- submit cmMfg do
-    exercise cmInv CMfill with 
-      oid = acceptedAssemblyOrder
-
-  let componentsInventory = asInventory._1
-  let componentsOrder = asInventory._2
-
-  asmblInventory <- submit assmbly do
-    exercise assemblyInventory ASAssemble with
-      cmpnntId = componentsOrder
-
-  let asInv = asmblInventory._1
-  let asCmpnntInv = asmblInventory._2
-
-  whseOrder <- submit dist do
-    create Order with
-      buyer = dist
-      oSupplier = dist
-      sku = "abc123"
-      qty = 2
-      status = "Open"
-      assetType = Assmbld
-      observers = [assmbly]
-
-  acceptedWhseOrder <- submit assmbly do
-    exercise whseOrder OrderAccept with 
-      party = assmbly
-
-  wsInventory <- submit assmbly do
-    exercise asInv ASMfill with 
-      oid = acceptedWhseOrder
-
-  let whseInv = wsInventory._1
-  let whseOrder = wsInventory._2
-
-  whse <- submit dist do
-    exercise warehouseInventory WHSStore with
-      assmblyId = whseOrder
-
-  let whsInv = whse._1
-  let whseAssmblyInv = whse._2
-
-  storeOrder <- submit store do
-    create Order with
-      buyer = store
-      oSupplier = store
-      sku = "abc123"
-      qty = 1
-      status = "Open"
-      assetType = Wrhsd
-      observers = [dist]
-
-  acceptedStoreOrder <- submit dist do
-    exercise storeOrder OrderAccept with 
-      party = dist
-
-  submit dist do
-    exercise whsInv WHSfill with 
-      oid = acceptedStoreOrder
-
   
-

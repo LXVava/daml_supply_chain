@@ -1,0 +1,181 @@
+daml 1.2
+module Tests.SupplyChain where
+
+import SCTypes
+import RMInventory
+import CMInventory
+import ASMInventory
+import WHSInventory
+import Order
+
+
+supplyChaninTest = scenario do
+  store <- getParty "Retailer"
+  dist <- getParty "Warehouse"
+  assmbly <- getParty "Assembler"
+  cmMfg <- getParty "Manufacturer"
+  rmPrd <- getParty "RawMaterialProducer"
+
+  -- initialize RawMaterials to 100 units and all other to 0
+  rawMaterialsInventory <- submit rmPrd do
+    create RawMaterial with
+      supplier = rmPrd
+      owner = rmPrd
+      sku = "raw-3465"
+      qty = 100
+      observers = []
+
+  componentInventory <- submit cmMfg do
+    create Component with
+      supplier = cmMfg
+      owner = cmMfg
+      sku = "cmpt-2134"
+      qty = 0
+      observers = []
+
+  assemblyInventory <- submit assmbly do
+    create Assembly with
+      supplier = assmbly
+      owner = assmbly
+      sku = "part-187"
+      qty = 0
+      observers = []
+
+  warehouseInventory <- submit dist do
+    create Warehouse with
+      supplier = dist
+      owner = dist
+      sku = "part-187"
+      qty = 0
+      observers = []
+
+  -- the manufacturer places an order for 50 units of raw material
+  rawMaterialsOrder <- submit cmMfg do
+    create OpenOrder with
+      buyer = cmMfg
+      sku = "raw-3465"
+      qty = 50
+      assetType = RwMtrl
+      observers = [rmPrd]
+
+  -- The raw materials producer accepts the order
+  acceptedRawMaterialsOrder <- submit rmPrd do
+    exercise rawMaterialsOrder Accept with 
+      party = rmPrd
+
+  -- the raw materials producer fills the order
+  inv <- submit rmPrd do
+    exercise rawMaterialsInventory RMfill with 
+      oid = acceptedRawMaterialsOrder
+
+  -- the raw materials producer transfers the inventory to the manufacturer
+  rawMaterialsOrderTransfer <- submit rmPrd do
+    exercise inv._2 RMTransfer with
+      newOwner = cmMfg
+  
+  -- the manufacturer accpts the raw materials
+  rawMaterialsOrder <- submit cmMfg do
+    exercise rawMaterialsOrderTransfer RMAccept
+
+  -- the manufacturer manufactures 15 components using 34 units of raw materials
+  mfg <- submit cmMfg do
+    exercise componentInventory CMMfg with
+      rwInvId = rawMaterialsOrder
+      materialsUsed = 34
+      componentsManufactured = 15
+
+  -- the assembler places an order for 10 components from the manufacturer
+  assemblyComponenetOrder <- submit assmbly do
+    create OpenOrder with
+      buyer = assmbly
+      sku = "cmpt-2134"
+      qty = 10
+      assetType = Cmpnnt
+      observers = [cmMfg]
+
+  -- the manfufacturer accepts the order 
+  acceptedAssemblyOrder <- submit cmMfg do
+    exercise assemblyComponenetOrder Accept with 
+      party = cmMfg
+
+  -- the manfufacturer fills the order
+  asInventory <- submit cmMfg do
+    exercise mfg._1 CMfill with 
+      oid = acceptedAssemblyOrder
+
+  -- the manufacturer transfer the inventory to the assembler
+  cmpntTransfer <- submit cmMfg do
+    exercise asInventory._2 CMTransfer with
+      newOwner = assmbly
+
+  -- the assembler accepts the order from the manufacturer
+  componentsOrder <- submit assmbly do
+    exercise cmpntTransfer CMAccept
+
+  -- the assembler assmbles 6 parts from the 8 components
+  asmblInventory <- submit assmbly do
+    exercise assemblyInventory ASAssemble with
+      cmpnntId = componentsOrder
+      componentsUsed = 8
+      partsAssembled = 6
+
+  -- the warehouse orders 5 parts from the assembler
+  whseOrder <- submit dist do
+    create OpenOrder with
+      buyer = dist
+      sku = "part-187"
+      qty = 5
+      assetType = Assmbld
+      observers = [assmbly]
+
+  -- the assembler accepts the order 
+  acceptedWhseOrder <- submit assmbly do
+    exercise whseOrder Accept with 
+      party = assmbly
+
+  -- the assembler fills the order
+  wsInventory <- submit assmbly do
+    exercise asmblInventory._1 ASMfill with 
+      oid = acceptedWhseOrder
+
+  -- the assembler transfers the inventory to the warehouse
+  whseTransfer <- submit assmbly do
+    exercise wsInventory._2 ASMTransfer with
+      newOwner = dist
+
+  -- the warehouse accepts the transfer
+  whseOrder <- submit dist do
+    exercise whseTransfer ASMAccept
+
+  -- the warehouse stores the items archiving the assembly invventory
+  whse <- submit dist do
+    exercise warehouseInventory WHSStore with
+      assmblyId = whseOrder
+
+  -- the store orders 3 parts from the warehouse
+  storeOrder <- submit store do
+    create OpenOrder with
+      buyer = store
+      sku = "part-187"
+      qty = 3
+      assetType = Wrhsd
+      observers = [dist]
+
+  -- the warehouse accepts the order
+  acceptedStoreOrder <- submit dist do
+    exercise storeOrder Accept with 
+      party = dist
+
+  -- the warehouse fills the order
+  storeOrderOpen <- submit dist do
+    exercise whse._1 WHSfill with 
+      oid = acceptedStoreOrder
+
+  -- the warehouse transfers teh inventory
+  storeTransfer <- submit dist do
+    exercise storeOrderOpen._2 WHSTransfer with 
+      newOwner = store
+
+  -- the store accepts the transfer
+  submit store do
+    exercise storeTransfer WHSAccept

@@ -3,15 +3,13 @@ module Order where
 
 import SCTypes
 
-type OrderCid = ContractId Order
+type OpenOrderCid = ContractId OpenOrder
 
-template Order
+template OpenOrder
   with
     buyer : Party
-    oSupplier : Party
     sku : Text
     qty : Int
-    status : Text
     assetType : AssetType
     observers : [Party] 
   where
@@ -19,38 +17,84 @@ template Order
 
     controller observers can
 
-        OrderAccept : OrderCid
+        Accept : AcceptedOrderCid
             with
                 party : Party
-            do create this with 
-                status = "Accept"
-                oSupplier = party
+            do create AcceptedOrder with
+                buyer = buyer
+                supplier = party
+                sku = sku
+                qty = qty
                 observers = []
+                assetType = assetType
 
     controller buyer can 
 
-        OrderCancel :  OrderCid
-            do create this with
-                status = "Cancelled"
+        Cancel :  CancelledOrderCid
+            do create CancelledOrder with
+                buyer = buyer
+                sku = sku
+                qty = qty
+                observers = observers
+                assetType = assetType
 
-    controller oSupplier can
 
-        OrderFill : OrderCid
+type AcceptedOrderCid = ContractId AcceptedOrder
+template AcceptedOrder
+  with
+    buyer : Party
+    supplier : Party
+    sku : Text
+    qty : Int
+    assetType : AssetType
+    observers : [Party] 
+  where
+    signatory buyer
+
+    controller supplier can
+    
+        Fill : FilledOrderCid
             with
                 fillQuantity : Int
                 fillAssetType : AssetType
+                fillSku : Text
             do
                 assert (
                     fillQuantity == qty &&
-                    fillAssetType == assetType
+                    assetType == fillAssetType &&
+                    sku == fillSku
                     )
-                oid <- create this with 
-                    status = "Filled"
+                oid <- create FilledOrder with 
+                    buyer = buyer
+                    supplier = supplier
+                    sku = sku
+                    qty = qty
+                    assetType = assetType
                 archive oid
                 return oid
-       
 
-        OrderReject : OrderCid
-            do 
-            create this with 
-                status = "Rejected"
+
+type FilledOrderCid = ContractId FilledOrder
+template FilledOrder
+  with
+    buyer : Party
+    supplier : Party
+    sku : Text
+    qty : Int
+    assetType : AssetType
+
+  where
+    signatory supplier
+
+type CancelledOrderCid = ContractId CancelledOrder
+template CancelledOrder
+  with
+    buyer : Party
+    sku : Text
+    qty : Int
+    assetType : AssetType
+    observers : [Party] 
+  where
+    signatory buyer
+
+    

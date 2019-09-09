@@ -4,5 +4,5 @@ module SCTypes where
 
 data AssetType =
   RwMtrl | Cmpnnt | Assmbld | Wrhsd | Dsplyd
-    deriving (Eq, Show, Ord)
+    deriving (Eq, Show)
 

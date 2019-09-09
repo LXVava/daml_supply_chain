@@ -6,90 +6,78 @@ import Order
 
 type RawMaterialCid = ContractId RawMaterial
 template RawMaterial
+
   with
     supplier : Party
     owner : Party
     sku : Text
     qty : Int
     observers : [Party]
+
   where
     ensure qty > 0
 
-    signatory supplier
+    signatory owner
 
     observer observers
 
-
     controller owner can
 
-        RMQty : RawMaterialCid
-            with
-                nQty : Int
-            do
-                create this with
-                    qty = nQty
-
+        -- Split mark the order filled with RawMaterials Asset Type
         RMfill : (RawMaterialCid, RawMaterialCid)
             with
-                oid : OrderCid
+                oid : AcceptedOrderCid
             do 
                 order <- fetch oid
-
-                let fAmount = order.qty
                 assert (
                     order.assetType == RwMtrl &&
-                    fAmount <= qty
+                    order.qty <= qty
                     )
                 
-                exercise oid OrderFill with 
-                    fillQuantity = fAmount
-                    fillAssetType = RwMtrl                
+                exercise oid Fill with 
+                    fillQuantity = order.qty
+                    fillAssetType = RwMtrl
+                    fillSku = sku                
 
-                inv <- create this with qty = qty - fAmount
+                inv <- create this with 
+                    qty = qty - order.qty
+
                 fill <- create this with 
-                    qty = fAmount
-                    owner = order.buyer
+                    qty = order.qty
+
                 return (inv, fill)
 
-        -- Split the Inventory by dividing the amount.
-        RMSplit : (RawMaterialCid, RawMaterialCid)
+        RMTransfer : RawMaterialsTransferID
             with
-                splitAmount: Int
-            do
-                let restAmount = qty - splitAmount
-                splitCid <- create this with qty = splitAmount
-                restCid <- create this with qty = restAmount
-                return (splitCid, restCid)
+                newOwner : Party
+            do create RawMaterialsTransfer with
+                rMaterials = this; newOwner
+                
 
-        -- Merge two Inventories by aggregating their amounts.
-        RMMerge : RawMaterialCid
-            with
-                otherCid: RawMaterialCid
-            do
-                otherRawMaterial <- fetch otherCid
-                -- Check the two Inventories are compatible
-                assert (
-                    sku == otherRawMaterial.sku &&
-                    owner == otherRawMaterial.owner &&
-                    supplier == otherRawMaterial.supplier
-                    )
-                -- Retire the old Item
-                archive otherCid
-                -- Return the merged Item
-                create this with qty = qty + otherRawMaterial.qty
-               
+type RawMaterialsTransferID = ContractId RawMaterialsTransfer
+template RawMaterialsTransfer
 
-        RMAddObserver : RawMaterialCid
-            with
-                newObserver : Party
-            do 
-                create this with 
-                    observers = newObserver :: observers
+    with 
+        rMaterials : RawMaterial
+        newOwner: Party
 
-        RMRemoveObserver : RawMaterialCid
-            with
-                oldObserver : Party
-            do 
-                create this with 
-                    observers = filter (/= oldObserver) observers
+    where
 
+        signatory rMaterials.supplier, rMaterials.owner
+
+        controller rMaterials.owner can
+
+            RMCancel : RawMaterialCid
+                do create rMaterials
+
+        controller newOwner can
+
+            RMReject : RawMaterialCid
+                do create rMaterials
+
+            RMAccept : RawMaterialCid
+                do
+                newrmtrls <- create rMaterials with
+                    owner = newOwner
+                    observers = []
+                return newrmtrls

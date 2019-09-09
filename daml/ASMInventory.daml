@@ -7,90 +7,45 @@ import Order
 import CMInventory
 
 type AssemblyCid = ContractId Assembly
-
 template Assembly
+
   with
     supplier : Party
     owner : Party
     sku : Text
     qty : Int
     observers : [Party]
+
   where
     ensure qty >= 0
 
-    signatory supplier
+    signatory owner
 
     observer observers
 
-
     controller owner can
-
-        ASMQty : AssemblyCid
-            with
-                nQty : Int
-            do
-                create this with
-                    qty = nQty
 
         ASAssemble : (AssemblyCid, ComponentCid)
             with
                 cmpnntId : ComponentCid
+                componentsUsed : Int
+                partsAssembled : Int
             do
                 component <- fetch cmpnntId
-                let asmAmount = component.qty / 2
-                let remainAmount = component.qty % 2
-                nCmpntInv <- exercise cmpnntId CMQty with
-                    nQty = remainAmount
+                assert(componentsUsed <= component.qty )
+                archive cmpnntId
+
+                nCmpntInv <- create component with
+                    qty = component.qty - componentsUsed
+
                 asmInv <- create this with 
-                    qty = asmAmount
+                    qty = partsAssembled                
+
                 return (asmInv, nCmpntInv)
-
-
-        -- Split the Inventory by dividing the amount.
-        ASMSplit : (AssemblyCid, AssemblyCid)
-            with
-                splitAmount: Int
-            do
-                let restAmount = qty - splitAmount
-                splitCid <- create this with qty = splitAmount
-                restCid <- create this with qty = restAmount
-                return (splitCid, restCid)
-
-        -- Merge two Inventories by aggregating their amounts.
-        ASMMerge : AssemblyCid
-            with
-                otherCid: AssemblyCid
-            do
-                otherAssembly <- fetch otherCid
-                -- Check the two Inventories are compatible
-                assert (
-                    sku == otherAssembly.sku &&
-                    owner == otherAssembly.owner &&
-                    supplier == otherAssembly.supplier
-                    )
-                -- Retire the old Item
-                archive otherCid
-                -- Return the merged Item
-                create this with qty = qty + otherAssembly.qty
-               
-
-        ASMAddObserver : AssemblyCid
-            with
-                newObserver : Party
-            do 
-                create this with 
-                    observers = newObserver :: observers
-
-        ASMRemoveObserver : AssemblyCid
-            with
-                oldObserver : Party
-            do 
-                create this with 
-                    observers = filter (/= oldObserver) observers
 
         ASMfill : (AssemblyCid, AssemblyCid)
             with
-                oid : OrderCid
+                oid : AcceptedOrderCid
             do  
                 order <- fetch oid
                 assert (
@@ -100,13 +55,47 @@ template Assembly
 
                 let fAmount = order.qty
                
-                exercise oid OrderFill with 
+                exercise oid Fill with 
                     fillQuantity = fAmount
-                    fillAssetType = Assmbld                
+                    fillAssetType = Assmbld
+                    fillSku = sku               
 
-                inv <- create this with qty = qty - fAmount
+                inv <- create this with 
+                    qty = qty - fAmount
+
                 fill <- create this with 
                     qty = fAmount
-                    owner = order.buyer
                 return (inv, fill)
-            
+        
+        ASMTransfer : AssemblyTransferId
+            with
+                newOwner : Party
+            do create AssemblyTransfer with
+                assmbly = this; newOwner
+
+
+
+type AssemblyTransferId = ContractId AssemblyTransfer
+template AssemblyTransfer
+
+    with 
+        assmbly : Assembly
+        newOwner: Party
+        
+    where
+        signatory assmbly.supplier, assmbly.owner
+
+        controller assmbly.owner can
+            ASMCancel : AssemblyCid
+                do create assmbly
+
+        controller newOwner can
+            ASMReject : AssemblyCid
+                do create assmbly
+
+            ASMAccept : AssemblyCid
+                do
+                newassmbly <- create assmbly with
+                    owner = newOwner
+                    observers = []
+                return newassmbly
